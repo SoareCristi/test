@@ -14,17 +14,21 @@ class ViewController: UIViewController, UITableViewDelegate, UITableViewDataSour
     var hourlyModels = [HourlyForecast]()
     let locationManager = CLLocationManager()
     var currentLocation: CLLocation?
+    var currentWeather: HourlyForecast?
+    var currentName: String?
     
     
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
+        //Register 2 cells
         table.register(HourlyTableViewCell.nib(), forCellReuseIdentifier: HourlyTableViewCell.identifier)
-        //table.register(WeatherTableViewCell.nib(), forCellReuseIdentifier: WeatherTableViewCell.identifier)
+        table.register(WeatherTableViewCell.nib(), forCellReuseIdentifier: WeatherTableViewCell.identifier)
         
         table.delegate = self
         table.dataSource = self
+        
         
         table.backgroundColor = UIColor(red: 227/255.0, green: 244/255.0, blue: 254/255.0, alpha: 0.5)
         view.backgroundColor = UIColor(red: 227/255.0, green: 244/255.0, blue: 254/255.0, alpha: 1.0)
@@ -38,6 +42,7 @@ class ViewController: UIViewController, UITableViewDelegate, UITableViewDataSour
     
     
     func setupLocation() {
+        
         locationManager.delegate = self
         locationManager.requestWhenInUseAuthorization()
         locationManager.startUpdatingLocation()
@@ -74,6 +79,8 @@ class ViewController: UIViewController, UITableViewDelegate, UITableViewDataSour
                 return
             }
             var locationKey: String?
+            var locationName: String?
+            var locationCountryName: String?
             
             do {
                 let json = try JSONSerialization.jsonObject(with: data, options: [])
@@ -83,6 +90,24 @@ class ViewController: UIViewController, UITableViewDelegate, UITableViewDataSour
                     locationKey = key
                 }
                 
+                //get location name
+                if let dict = json as? [String: Any],
+                   let adminArea = dict["AdministrativeArea"] as? [String: Any],
+                   let name = adminArea["EnglishName"] as? String {
+                        locationName = name
+                } else {
+                    print("Error: invalid JSON format")
+                }
+                
+                
+                //get location country name
+                if let dict = json as? [String: Any],
+                   let adminArea = dict["Country"] as? [String: Any],
+                   let name = adminArea["EnglishName"] as? String {
+                        locationCountryName = name
+                } else {
+                    print("Error: invalid JSON format")
+                }
                 
             } catch {
                 print("Error decoding location data: \(error)")
@@ -92,9 +117,16 @@ class ViewController: UIViewController, UITableViewDelegate, UITableViewDataSour
                 print("could not get location key")
                 return
             }
+            guard let locName = locationName else {
+                print("could not get location name")
+                return
+            }
+            guard let locCountryName = locationCountryName else {
+                print("could not get location country name")
+                return
+            }
             
-            
-            //Get forecast for 12 hours
+            // Get forecast for the next 12 hours
             let hourlyUrl = "https://dataservice.accuweather.com/forecasts/v1/hourly/12hour/\(locKey)?apikey=\(apiKey)&metric=true"
             URLSession.shared.dataTask(with: URL(string: hourlyUrl)!) { (data, response, error) in
                 guard let data = data, error == nil else {
@@ -131,21 +163,32 @@ class ViewController: UIViewController, UITableViewDelegate, UITableViewDataSour
                         print("could not get daily forecasts")
                         return
                     }
-                
                     
                     self.dailyModels.append(contentsOf: dailyForecasts)
 
+                    //Using the first hour from the 12 hour forecast as the current weather
+                    let currentForecast = hourlyForecasts
+                    self.currentWeather = currentForecast[0]
+                    
+                    let currentName = "\(locCountryName), \(locName)"
+                    self.currentName = currentName
+                    
                     self.hourlyModels = hourlyForecasts
+
                     // Update UI
                     DispatchQueue.main.async {
                         // do something with hourlyForecasts and dailyForecasts
                         DispatchQueue.main.async {
                             self.table.reloadData()
+                            self.table.tableHeaderView = self.createtableHeader()
                         }
                     }
                 }.resume()
             }.resume()
         }.resume()
+        
+
+        
     }
     
     //Table
@@ -153,7 +196,7 @@ class ViewController: UIViewController, UITableViewDelegate, UITableViewDataSour
     func numberOfSections(in tableView: UITableView) -> Int {
         return 2
     }
-    
+
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         if section == 0 {
             // 1 cell that is collectiontableviewcell
@@ -181,13 +224,64 @@ class ViewController: UIViewController, UITableViewDelegate, UITableViewDataSour
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
         return 150
     }
+    
+    func createtableHeader() -> UIView {
+        let headerView = UIView(frame: CGRect(x: 0, y: 0, width: view.frame.size.width, height: view.frame.size.width))
+        headerView.backgroundColor = UIColor(red: 227/255.0, green: 244/255.0, blue: 254/255.0, alpha: 0.5)
+        
+        let locationLabel = UILabel(frame: CGRect(x: 10, y: 10, width: view.frame.size.width-20, height: headerView.frame.size.height/5))
+        let summaryLabel = UILabel(frame: CGRect(x: 10, y: 20+locationLabel.frame.size.height, width: view.frame.size.width-20, height: headerView.frame.size.height/5))
+        let tempLabel = UILabel(frame: CGRect(x: 10, y: 20+locationLabel.frame.size.height+summaryLabel.frame.size.height, width: view.frame.size.width-20, height: headerView.frame.size.height/2))
+        
+        headerView.addSubview(locationLabel)
+        headerView.addSubview(tempLabel)
+        headerView.addSubview(summaryLabel)
+        
+        tempLabel.textAlignment = .center
+        locationLabel.textAlignment = .center
+        summaryLabel.textAlignment = .center
+        
+        tempLabel.font = UIFont(name: "Helvetica-Bold", size: 32)
+        
+        guard let currentName = self.currentName else {
+            return UIView()
+        }
+        
+        guard let currentWeather = self.currentWeather else {
+            return UIView()
+        }
+        
+        locationLabel.text = currentName
+        
+        tempLabel.text = "\(String(describing: currentWeather.temperature.value))°"
+        tempLabel.font = UIFont(name: "Helvetica-Bold", size: 32)
+        
+        summaryLabel.text = self.currentWeather?.iconPhrase
+        
+        if let weatherIcon = self.currentWeather?.weatherIcon {
+            if(weatherIcon > 11 && weatherIcon < 19){
+                self.showWeatherAlert()
+            }
+        }
+        
+        return headerView
+    }
+    
+    func showWeatherAlert() {
+        let alertController = UIAlertController(title: "Weather Alert", message: "It's raining outside.", preferredStyle: .alert)
+        
+        let okAction = UIAlertAction(title: "OK", style: .default) { _ in
+            print("OK")
+        }
+        alertController.addAction(okAction)
+        
+        present(alertController, animated: true, completion: nil)
+    }
 
 }
 
 //Codable struct object to store the data from the requests with JSONDecoder
 
-
-//HourlyForecast
 struct HourlyForecast: Codable {
     let dateTime: String
     let epochDateTime: Int
@@ -230,7 +324,7 @@ struct Temperature: Codable {
     }
 }
 
-//DailyForecast
+
 struct FiveDaysForecast: Codable {
     let headline: Headline
     let dailyForecasts: [DailyForecast]
